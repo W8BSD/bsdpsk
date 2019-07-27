@@ -11,8 +11,10 @@ int main(int argc, char **argv)
 	audio = setup_audio_in("/dev/dsp-mixer", 1, 8000);
 	psk_rx = setup_rx(1500 /* Freq */, 8000);
 
-	for (;;)
+	for (;;) {
 		printf("%c", get_psk_ch(psk_rx, audio));
+		fflush(stdout);
+	}
 
 	return 0;
 }

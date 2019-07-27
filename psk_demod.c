@@ -57,11 +57,15 @@ setup_rx(double freq, int dsp_rate)
 	ret->dsp_rate = dsp_rate;
 	ret->freq = freq;
 
+	ret->fir = create_matched_filter(ret->freq, ret->dsp_rate, ((double)ret->dsp_rate)/31.25);
+	if (ret->fir == NULL)
+		goto fail;
+
 	return ret;
 fail:
 	if (ret != NULL) {
 		if (ret->fir != NULL)
-			free(ret->fir);
+			free_fir_filter(ret->fir);
 		free(ret);
 	}
 	return (NULL);
@@ -83,11 +87,6 @@ get_psk_bit(struct psk_rx *rx, struct audio *a)
 	switch(rx->state) {
 		case 0:
 			rx->inverted = 1;
-			if (rx->fir != NULL)
-				free_fir_filter(rx->fir);
-			rx->fir = create_matched_filter(rx->freq, rx->dsp_rate, ((double)rx->dsp_rate)/31.25);
-			if (rx->fir == NULL)
-				return (-1);
 			rx->peak_ago = 0;
 			rx->peak = 0.0;
 			while(audio_read(a, &buf, sizeof(buf)) == sizeof(buf)) {

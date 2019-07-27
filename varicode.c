@@ -49,9 +49,11 @@ static const uint16_t varicode[128] = {
 uint16_t
 asc2varicode(char ch)
 {
-	if (ch < 0 || ch >= sizeof(varicode) / sizeof(*varicode))
+	int c = ch;
+
+	if (c < 0 || c >= sizeof(varicode) / sizeof(*varicode))
 		return 0;
-	return varicode[ch];
+	return varicode[c];
 }
 
 int

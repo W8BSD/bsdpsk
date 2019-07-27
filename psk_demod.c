@@ -28,6 +28,7 @@
 #include <sys/soundcard.h>
 #include <sys/types.h>
 #include <math.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -39,6 +40,7 @@ struct psk_rx {
 	struct fir_filter *fir;
 	double freq;
 	double peak;
+	double squelch;
 	int dsp_rate;
 	int state;
 	int peak_ago;
@@ -46,7 +48,7 @@ struct psk_rx {
 };
 
 struct psk_rx *
-setup_rx(double freq, int dsp_rate)
+setup_rx(double freq, int dsp_rate, double squelch)
 {
 	struct psk_rx *ret;
 
@@ -56,6 +58,7 @@ setup_rx(double freq, int dsp_rate)
 
 	ret->dsp_rate = dsp_rate;
 	ret->freq = freq;
+	ret->squelch = squelch;
 
 	ret->fir = create_matched_filter(ret->freq, ret->dsp_rate, ((double)ret->dsp_rate)/31.25);
 	if (ret->fir == NULL)
@@ -74,19 +77,16 @@ fail:
 static int
 get_psk_bit(struct psk_rx *rx, struct audio *a)
 {
-	struct fir_filter *invert;
-	static double max = 0.5;
-	static double min = -0.5;
-	double d, di, dt, ad;
+	double d, ad;
 	uint16_t buf;
 	int c = 0;
 	int sc = rx->dsp_rate / 31.25;
-	int lsc = sc / 4;
-	int hsc = lsc * 3;
+	int hsc = sc / 2;
+	bool ret;
 
 	switch(rx->state) {
 		case 0:
-			rx->inverted = 1;
+			// TODO: The time this takes is unbounded...
 			rx->peak_ago = 0;
 			rx->peak = 0.0;
 			while(audio_read(a, &buf, sizeof(buf)) == sizeof(buf)) {
@@ -97,42 +97,53 @@ get_psk_bit(struct psk_rx *rx, struct audio *a)
 					rx->peak = ad;
 					rx->peak_ago = 0;
 				}
-				if (rx->peak_ago == lsc * 2 && rx->peak > 100) {
+				if (rx->peak_ago == hsc && rx->peak > rx->squelch) {
 					rx->state = 1;
-					return (0);
+					break;
 				}
 			}
-			break;
-		case 1:
-			// We're at a "trough"...
-			// TODO: Exit this state at some point. :D
-			// TODO: Clock recovery
-			for (c=0; c<sc; c++) {
-				if(audio_read(a, &buf, sizeof(buf)) == sizeof(buf)) {
-					d = fir_filter(buf, rx->fir);
-				}
-				else {
-					return (-1);
-				}
+			// Advance to the next peak...
+			memmove(&rx->fir->buf[0], &rx->fir->buf[sc / 2], rx->fir->len - (sc / 2));
+			for (c = 0; c < hsc; c++) {
+				audio_read(a, &buf, sizeof(buf));
+				rx->fir->buf[sc / 2 + c] = buf;
 			}
-			// Calculate the inverted d...
-			di = inverted_fir_filter(rx->fir);
-			if (rx->inverted) {
-				dt = d;
-				d = di;
-				di = dt;
-			}
-			if (d < di) {
-				rx->inverted = !rx->inverted;
+			d = fir_filter_calc(rx->fir);
+			if (fabs(d) > rx->squelch) {
+				rx->inverted = d > 0.0;
+				rx->state = 1;
 				return (0);
 			}
-			return (1);
+			// False alarm...
+			return (-1);
+		case 1:
+			// We're at a "peak"...
+			// TODO: Clock recovery
+			for (c=0; c<sc; c++) {
+				if(audio_read(a, &buf, sizeof(buf)) == sizeof(buf))
+					rx->fir->buf[c] = (float)buf;
+				else
+					return (-1);
+			}
+			d = fir_filter_calc(rx->fir);
+			if (fabs(d) < rx->squelch)
+				return -1;
+			if (d < 0.0)
+				ret = true;
+			else
+				ret = false;
+			if (rx->inverted)
+				ret = !ret;
+			if (!ret)
+				rx->inverted = !rx->inverted;
+			return (ret);
 		default:
 			break;
 	}
 	return (-1);
 }
 
+// TODO: Maybe this should be passed in samples instead of reading itself.
 int
 get_psk_ch(struct psk_rx *rx, struct audio *a)
 {

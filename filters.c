@@ -32,19 +32,25 @@
 #include "filters.h"
 
 double
-fir_filter(int16_t value, struct fir_filter *f)
+fir_filter_calc(struct fir_filter *f)
 {
 	size_t i;
 	float res = 0;
-
-	memmove(f->buf, &f->buf[1], sizeof(f->buf[0]) * (f->len - 1));
-	f->buf[f->len - 1] = (float)value;
 
 #pragma clang loop vectorize(enable)
 	for (i = 0; i < f->len; i++)
 		res += f->buf[i] * f->coef[i];
 
 	return (res / f->len);
+}
+
+double
+fir_filter(int16_t value, struct fir_filter *f)
+{
+	memmove(f->buf, &f->buf[1], sizeof(f->buf[0]) * (f->len - 1));
+	f->buf[f->len - 1] = (float)value;
+
+	return fir_filter_calc(f);
 }
 
 struct fir_filter *
@@ -83,19 +89,6 @@ create_matched_filter(double frequency, int dsp_rate, int len)
 		ret->coef[ret->len - i - 1] = sin((double)i / wavelen * (2.0 * M_PI));
 
 	return (ret);
-}
-
-double
-inverted_fir_filter(struct fir_filter *f)
-{
-	size_t i;
-	float res = 0;
-
-#pragma clang loop vectorize(enable)
-	for (i = 0; i < f->len; i++)
-		res -= f->buf[i] * f->coef[i];
-
-	return (res / f->len);
 }
 
 void

@@ -38,15 +38,23 @@
 
 struct psk_rx {
 	struct fir_filter *fir;
+	struct fir_filter *matched;
+	struct bq_filter *bpf;
 	double freq;
 	double peak;
 	double squelch;
 	int dsp_rate;
 	int state;
 	int peak_ago;
-	int inverted;
 };
 
+static double
+calc_q(double freq, double delta)
+{
+	return (freq/delta);
+}
+
+#include <stdio.h>
 struct psk_rx *
 setup_rx(double freq, int dsp_rate, double squelch)
 {
@@ -63,12 +71,19 @@ setup_rx(double freq, int dsp_rate, double squelch)
 	ret->fir = create_matched_filter(ret->freq, ret->dsp_rate, ((double)ret->dsp_rate)/31.25);
 	if (ret->fir == NULL)
 		goto fail;
+	ret->bpf = calc_bpf_coef(ret->freq, calc_q(freq, 62.5), ret->dsp_rate);
+	if (ret->bpf == NULL)
+		goto fail;
 
 	return ret;
 fail:
 	if (ret != NULL) {
+		if (ret->bpf != NULL)
+			free_bq_filter(ret->bpf);
 		if (ret->fir != NULL)
 			free_fir_filter(ret->fir);
+		if (ret->matched != NULL)
+			free_fir_filter(ret->matched);
 		free(ret);
 	}
 	return (NULL);
@@ -77,8 +92,9 @@ fail:
 static int
 get_psk_bit(struct psk_rx *rx, struct audio *a)
 {
-	double d, ad;
-	uint16_t buf;
+	struct fir_filter *new;
+	double bp, d, ad;
+	int16_t buf;
 	int c = 0;
 	int sc = rx->dsp_rate / 31.25;
 	int hsc = sc / 2;
@@ -87,10 +103,16 @@ get_psk_bit(struct psk_rx *rx, struct audio *a)
 	switch(rx->state) {
 		case 0:
 			// TODO: The time this takes is unbounded...
+			if (rx->matched == NULL) {
+				rx->matched = create_matched_filter(rx->freq, rx->dsp_rate, ((double)rx->dsp_rate)/31.25);
+				if (rx->matched == NULL)
+					return -1;
+			}
 			rx->peak_ago = 0;
 			rx->peak = 0.0;
 			while(audio_read(a, &buf, sizeof(buf)) == sizeof(buf)) {
-				d = fir_filter(buf, rx->fir);
+				bp = bq_filter(buf, rx->bpf);
+				d = fir_filter(bp, rx->matched);
 				ad = fabs(d);
 				rx->peak_ago++;
 				if (ad > rx->peak) {
@@ -103,15 +125,17 @@ get_psk_bit(struct psk_rx *rx, struct audio *a)
 				}
 			}
 			// Advance to the next peak...
-			memmove(&rx->fir->buf[0], &rx->fir->buf[sc / 2], rx->fir->len - (sc / 2));
+			memmove(&rx->matched->buf[0], &rx->matched->buf[sc / 2], rx->matched->len - (sc / 2));
 			for (c = 0; c < hsc; c++) {
 				audio_read(a, &buf, sizeof(buf));
-				rx->fir->buf[sc / 2 + c] = buf;
+				rx->matched->buf[sc / 2 + c] = bq_filter(buf, rx->bpf);
 			}
-			d = fir_filter_calc(rx->fir);
+			d = fir_filter_calc(rx->matched);
 			if (fabs(d) > rx->squelch) {
-				rx->inverted = d > 0.0;
 				rx->state = 1;
+				memcpy(rx->fir->buf, rx->matched->buf, rx->fir->len * sizeof(*rx->fir->buf));
+				free_fir_filter(rx->matched);
+				rx->matched = NULL;
 				return (0);
 			}
 			// False alarm...
@@ -119,9 +143,10 @@ get_psk_bit(struct psk_rx *rx, struct audio *a)
 		case 1:
 			// We're at a "peak"...
 			// TODO: Clock recovery
+			memcpy(rx->fir->coef, rx->fir->buf, rx->fir->len * sizeof(*rx->fir->coef));
 			for (c=0; c<sc; c++) {
 				if(audio_read(a, &buf, sizeof(buf)) == sizeof(buf))
-					rx->fir->buf[c] = (float)buf;
+					rx->fir->buf[c] = bq_filter(buf, rx->bpf);
 				else
 					return (-1);
 			}
@@ -129,13 +154,9 @@ get_psk_bit(struct psk_rx *rx, struct audio *a)
 			if (fabs(d) < rx->squelch)
 				return -1;
 			if (d < 0.0)
-				ret = true;
-			else
 				ret = false;
-			if (rx->inverted)
-				ret = !ret;
-			if (!ret)
-				rx->inverted = !rx->inverted;
+			else
+				ret = true;
 			return (ret);
 		default:
 			break;

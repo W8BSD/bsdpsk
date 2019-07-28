@@ -43,6 +43,7 @@ struct psk_rx {
 	double freq;
 	double peak;
 	double squelch;
+	double symbol_rate;
 	int dsp_rate;
 	int state;
 	int peak_ago;
@@ -56,7 +57,7 @@ calc_q(double freq, double delta)
 
 #include <stdio.h>
 struct psk_rx *
-setup_rx(double freq, int dsp_rate, double squelch)
+setup_rx(double symbol_rate, double freq, int dsp_rate, double squelch)
 {
 	struct psk_rx *ret;
 
@@ -67,11 +68,15 @@ setup_rx(double freq, int dsp_rate, double squelch)
 	ret->dsp_rate = dsp_rate;
 	ret->freq = freq;
 	ret->squelch = squelch;
+	ret->symbol_rate = symbol_rate;
 
-	ret->fir = create_matched_filter(ret->freq, ret->dsp_rate, ((double)ret->dsp_rate)/31.25);
+	ret->fir = create_matched_filter(ret->freq, ret->dsp_rate, ((double)ret->dsp_rate)/ret->symbol_rate);
 	if (ret->fir == NULL)
 		goto fail;
-	ret->bpf = calc_bpf_coef(ret->freq, calc_q(freq, 62.5), ret->dsp_rate);
+	ret->matched = create_matched_filter(ret->freq, ret->dsp_rate, ((double)ret->dsp_rate)/ret->symbol_rate);
+	if (ret->fir == NULL)
+		goto fail;
+	ret->bpf = calc_bpf_coef(ret->freq, calc_q(freq, ret->symbol_rate*2), ret->dsp_rate);
 	if (ret->bpf == NULL)
 		goto fail;
 
@@ -96,18 +101,13 @@ get_psk_bit(struct psk_rx *rx, struct audio *a)
 	double bp, d, ad;
 	int16_t buf;
 	int c = 0;
-	int sc = rx->dsp_rate / 31.25;
+	int sc = rx->dsp_rate / rx->symbol_rate;
 	int hsc = sc / 2;
 	bool ret;
 
 	switch(rx->state) {
 		case 0:
 			// TODO: The time this takes is unbounded...
-			if (rx->matched == NULL) {
-				rx->matched = create_matched_filter(rx->freq, rx->dsp_rate, ((double)rx->dsp_rate)/31.25);
-				if (rx->matched == NULL)
-					return -1;
-			}
 			rx->peak_ago = 0;
 			rx->peak = 0.0;
 			while(audio_read(a, &buf, sizeof(buf)) == sizeof(buf)) {
@@ -134,8 +134,6 @@ get_psk_bit(struct psk_rx *rx, struct audio *a)
 			if (fabs(d) > rx->squelch) {
 				rx->state = 1;
 				memcpy(rx->fir->buf, rx->matched->buf, rx->fir->len * sizeof(*rx->fir->buf));
-				free_fir_filter(rx->matched);
-				rx->matched = NULL;
 				return (0);
 			}
 			// False alarm...
@@ -151,8 +149,10 @@ get_psk_bit(struct psk_rx *rx, struct audio *a)
 					return (-1);
 			}
 			d = fir_filter_calc(rx->fir);
-			if (fabs(d) < rx->squelch)
+			if (fabs(d) < rx->squelch) {
+				memcpy(rx->matched->buf, rx->fir->buf, rx->matched->len * sizeof(*rx->matched->buf));
 				return -1;
+			}
 			if (d < 0.0)
 				ret = false;
 			else

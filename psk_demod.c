@@ -24,8 +24,6 @@
  *
  */
 
-#include <sys/ioctl.h>
-#include <sys/soundcard.h>
 #include <sys/types.h>
 #include <math.h>
 #include <stdbool.h>
@@ -55,7 +53,6 @@ calc_q(double freq, double delta)
 	return (freq/delta);
 }
 
-#include <stdio.h>
 struct psk_rx *
 setup_rx(double symbol_rate, double freq, int dsp_rate, double squelch)
 {

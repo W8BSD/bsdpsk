@@ -5,7 +5,7 @@ MANDIR?=	/man/man
 
 PROG=	bsdpsk
 LDADD=	-lm
-SRCS=	bsdpsk.c audio.c psk_demod.c varicode.c filters.c
+SRCS=	bsdpsk.c audio.c psk_demod.c psk_send.c varicode.c filters.c
 DPADD=	$(LIBM}
 
 .include <bsd.prog.mk>

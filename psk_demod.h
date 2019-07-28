@@ -27,6 +27,8 @@
 #ifndef PSK_DEMOD_H
 #define PSK_DEMOD_H
 
+#include "audio.h"
+
 struct psk_rx;
 
 struct psk_rx *setup_rx(double symbol_rate, double freq, int dsp_rate, double squelch);

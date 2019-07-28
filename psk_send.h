@@ -24,16 +24,16 @@
  *
  */
 
-#ifndef AUDIO_H
-#define AUDIO_H
+#ifndef PSK_SEND_H
+#define PSK_SEND_H
 
-#include <unistd.h>	// ssize_t
+#include "audio.h"
 
-struct audio;
+struct psk_tx;
 
-struct audio *setup_audio_in(const char *dsp_name, int dsp_channels, int dsp_rate);
-ssize_t audio_read(struct audio *audio, void *buf, size_t bytes);
-struct audio *setup_audio_out(const char *dsp_name, int dsp_channels, int dsp_rate);
-ssize_t audio_write(struct audio *audio, void *buf, size_t bytes);
+struct psk_tx *setup_tx(double symbol_rate, double freq, int dsp_rate);
+int send_psk_ch(struct psk_tx *tx, struct audio *a, char ch);
+int send_psk_start(struct psk_tx *tx, struct audio *a);
+int send_psk_end(struct psk_tx *tx, struct audio *a);
 
 #endif

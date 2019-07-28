@@ -149,13 +149,49 @@ send_psk_ch(struct psk_tx *tx, struct audio *a, char ch)
 	return 0;
 }
 
+static int
+half_bit_start(struct psk_tx *tx, struct audio *a)
+{
+	int i, j;
+	int16_t buf;
+
+	for (j = tx->envelope_len - 1, i = tx->envelope_len; i < tx->wave_len; i++, j--) {
+		if (j < 0)
+			j = 0;
+		buf = tx->wave[i] * tx->envelope[j];
+		if (tx->inverted)
+			buf = 0 - buf;
+		if (audio_write(a, &buf, sizeof(buf)) != sizeof(buf))
+			return -1;
+	}
+	return 0;
+}
+
 int
 send_psk_start(struct psk_tx *tx, struct audio *a)
 {
 	int i;
 
+	if (half_bit_start(tx, a) == -1)
+		return -1;
 	for (i = 0; i < 32; i++) {
 		if (send_psk_bit(tx, a, false) == -1)
+			return -1;
+	}
+	return 0;
+}
+
+static int
+half_bit_end(struct psk_tx *tx, struct audio *a)
+{
+	int i;
+	int16_t buf;
+
+	for (i = 0; i < tx->envelope_len; i++) {
+		buf = tx->wave[i] * tx->envelope[i];
+		if (tx->inverted)
+			buf = 0 - buf;
+		if (audio_write(a, &buf, sizeof(buf)) != sizeof(buf))
 			return -1;
 	}
 	return 0;
@@ -166,6 +202,8 @@ send_psk_end(struct psk_tx *tx, struct audio *a)
 {
 	int i;
 
+	if (half_bit_end(tx, a) == -1)
+		return -1;
 	for (i = 0; i < 32; i++) {
 		if (send_psk_bit(tx, a, true) == -1)
 			return -1;

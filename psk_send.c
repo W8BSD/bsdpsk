@@ -202,11 +202,11 @@ send_psk_end(struct psk_tx *tx, struct audio *a)
 {
 	int i;
 
-	if (half_bit_end(tx, a) == -1)
-		return -1;
 	for (i = 0; i < 32; i++) {
 		if (send_psk_bit(tx, a, true) == -1)
 			return -1;
 	}
+	if (half_bit_end(tx, a) == -1)
+		return -1;
 	return 0;
 }
